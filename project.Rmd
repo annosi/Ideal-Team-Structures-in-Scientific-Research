@@ -1,0 +1,432 @@
+---
+title: "Ideal Team Structures for Scientific Research"
+author: "Ann Osi"
+date: "4/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# About
+
+The number of multi-authored papers is rising. Authors from different backgrounds and qualifications are increasingly collaborating on scientific projects. Historically, researchers have stated that collaboration increases productivity, but the majority of researchers focus on studying factors that foster collaboration among scientists. This study tries to create a direct link between collaboration and productivity by identifying team structures that lead to successful outcomes in scientific research. 
+
+It asks two major questions:
+
+__1) Can patterns in individual co author contributions predict research success?__
+
+__2) Can the diverse composition of co authors predict research success?__
+<br>
+<br>
+To answer these questions, the study proposes three hypotheses:
+
+__1. Bigger teams have bigger success:__ Teams with a higher number of co authors have more successful papers.
+      
+__2. Individual author contributions matter:__ Teams where co authors are highly involved in all task groups are more successful.
+      
+__3. Diverse teams have bigger success:__ We test diversity using country of affiliation, presence of non academic researchers, and gender balance.
+<br>
+<br>
+
+\bigskip
+
+## Data Source
+
+The data is obtained from 60 Computer Science publications each (120 in total) from PNAS and NATURE journals spanning 2010 to 2019. The response variables and predictors are described below.
+
+1. Citations (citations): Citations is the most popular metric for measuring success of a scientific publication, and is thus the response variable. The dataset uses citations of each paper in 2022.
+
+2. Years since publication (years): Citations naturally increase with years, so the number of years since each publication date is calculated.
+
+3. Author contributions (involvement): First, submitted author contributions from PNAS and NATURE are merged into three task groups:
+    + Designed Research: conceived idea, conceived experiments, devised methodology, etc.
+    + Performed Research: data/results analysis, modeling/simulation, executed experiments, etc.
+    + Auxiliary Research: Wrote manuscript, supervised experiments, contributed tools, etc.
+
+The average author involvement for each paper is then calculated. For example,  in a three author paper where each author works in only one task group, the average author involvement is 1/3. The figure below shows that there are similar patterns of contributions in both journals. It will be interesting to see if such patterns are replicated in other journals.
+
+4. Diversity (us, academia, male): Author diversity is measured in three ways discussed below. Journals require authors to declare contact and employment information, while gender information is obtained from public websites.
+    + US affiliation: Categorical variable showing country of affiliation per paper
+      YES - All co authors are US affiliated
+      NO - At least one co author is US affiliated
+    + Categorical variable showing academia-industry collaboration
+      YES - All co authors work in academia
+      NO - At least one co author works in industry
+    + Categorical variable showing authors’ gender
+      YES - All co authors are male
+      NO - At least one co author is not male
+
+
+
+## Data Exploration
+
+Let us start by reading our data
+
+```{r}
+summary(data <- read.csv('contributions.csv',stringsAsFactors = TRUE))
+```
+
+First, we split our data into training and test portions.  
+
+```{r}
+set.seed(123)
+split_dummy <- sample(c(rep(0, 0.7 * nrow(data)),  # Create dummy for splitting
+                        rep(1, 0.3 * nrow(data))))
+train <- data[split_dummy == 0, ]
+test <- data[split_dummy == 1, ] 
+summary(train)
+```
+
+Next, we plot our data.
+
+```{r, fig.width=10, fig.height=12, fig.align='center'}
+
+par(mfrow=c(3,3))
+for(i in c(3:4)){
+  plot(train[,i], train$citations, xlab=names(train)[i],ylab='citations', pch=20,col=c(2,7)[(train$journal)])
+}
+
+plot(train[,5], train$citations, xlab=names(train)[5],ylab='citations', pch=20,col=c(2,7)[(train$journal)],xlim=c(0,1))
+
+for(i in c(1,6:8)){
+  boxplot(train$citations~as.factor(train[,i]), xlab=names(train)[i],ylab='citations', col=c(2,7))
+}
+
+```
+
+We need to do a log transform of citation because there is bunching. This will help us better observe this data. We can also see that citations is over dispersed i.e. there is a wide variance of citations values for a particular predictor. To confirm this, we will plot a histogram of citations.
+
+```{r, fig.width=10, fig.height=12, fig.align='center'}
+
+par(mfrow=c(3,3))
+for(i in c(3:4)){
+  plot(train[,i], log(train$citations), xlab=names(train)[i],ylab='log citations', pch=20,col=c(2,7)[(train$journal)])
+}
+
+plot(train[,5], log(train$citations), xlab=names(train)[5],ylab='citations', pch=20,col=c(2,7)[(train$journal)],xlim=c(0,1))
+
+for(i in c(1,6:8)){
+  boxplot(log(train$citations)~as.factor(train[,i]), xlab=names(train)[i],ylab='log citations', col=c(2,7))
+}
+
+hist((train$citations),col=2,ylab='citations')
+hist(log(train$citations),col=7,ylab='log citations')
+
+```
+
+Again, we can glean some observations from our plots above like:
+- Citations increase with years and number of authors
+- Citations are higher with academia-industry collaboration, gender diverse teams, and us-affiliated teams
+- Citations are higher in PNAS than in NATURE
+- Citations is over-dispersed. As a result, we might have problems getting good model fit.
+
+<br>
+However, we cannot rely on visual observations alone. We need to do regression analysis to better understand these relationships and test for significance.
+
+<br>
+\bigskip
+
+## Multiple Linear Regression
+
+We shall fit a mlr model using a log of citations.
+
+```{r}
+summary(reg <- lm(log(citations) ~ ., data = train))
+```
+
+Only authors and years are significant, with gender showing slight significance.
+Thus, this confirms our first hypothesis that bigger teams have more successful outcomes. 
+
+However, our poor results could be as a result of bad model assumptions. Our response variable is count data, and several of our predictors have 0 values. We shall fit a poisson model instead. We can see this from our histogram of citations below.
+
+```{r, fig.width=10, fig.height=5, fig.align='center'}
+par(mfrow=c(1,2))
+hist((train$citations),col=2,xlab='citations',main='Citations')
+hist(log(train$citations),col=7,xlab='log citations',main='Log citations')
+```
+
+
+## Generalized Linear Models
+
+
+```{r}
+library("visreg")
+library("statmod")
+```
+
+We shall fit a poisson regression with years as offset to account for citations recorded at different time periods.
+
+```{r}
+summary(preg <- glm(citations~.-years+offset(log(years)),family=poisson,data=train))
+```
+
+
+Using poisson regression, all of our variables are significant.
+
+Let us look at residual diagnostics.
+
+```{r,fig.align='center',fig.height=4,fig.width=12}
+qr.preg<-qresiduals(preg)
+
+par(mfrow=c(1,3))
+plot(preg$fitted, qr.preg,col=6,main="Randomized Quantile Residuals")
+abline(h=0)
+qqnorm(qr.preg,col=6,ylim=c(-8,8))
+abline(0,1)
+hist(qr.preg,col=6)
+```
+
+The fit is really, really bad.
+
+Let us look at some predictions.
+
+```{r,fig.align='center',fig.height=4,fig.width=9}
+lpred <- predict(preg,newdata=test,type="response")
+pred <- predict(preg,newdata=test)
+
+par(mfrow=c(1,2))
+plot(train$years, (train$citations), col=c(5,6)[as.numeric(train$journal)],xlab='years',ylab='citations')
+lines(lpred, col="darkorchid",lwd=2)
+
+plot(train$years, log(train$citations), col=c(5,6)[as.numeric(train$journal)],xlab='years',ylab='log citations')
+lines(pred, col="darkorchid",lwd=2)
+```
+
+What proportion of deviance is explained by our model?
+
+```{r}
+(preg$null.dev-preg$dev)/preg$null.dev
+```
+
+This is expected as we are only focusing on factors that may influence citations based on author characteristics.
+
+Let us see what our model looks like with interactions.
+
+```{r}
+summary(preg2 <- update(preg, . ~ .+.^2))
+```
+
+Let us reduce our model using stepwise regression.
+
+```{r}
+m <- dim(train)[1]
+summary(preg3 <- step(preg, scope=formula(preg2), 
+            direction="forward", k=log(m),trace=FALSE)
+)
+
+
+```
+
+Step-wise regression only takes out the interaction involvement:academia. 
+
+We shall try to explore other models ourselves.
+
+Let us see if the number of authors affects the task groups and task contributions.
+
+```{r}
+summary(preg4 <- update(preg, . ~ .+authors*(involvement)))
+```
+
+Let us see if group composition varies with journal type.
+
+```{r}
+summary(preg5 <- update(preg, . ~ .+journal*(us+academia+male)))
+```
+
+Let us see if country of affiliation affects academia and gender composition of teams.
+
+```{r}
+summary(preg6 <- update(preg, . ~ .+us*(academia+male)))
+```
+
+Let us combine our interactions into one big model.
+
+```{r}
+summary(preg7 <- update(preg, . ~.
+                        +authors*(involvement)
+                        +journal*(us+academia+male)
+                        +us*(academia+male)))
+```
+
+Now, let us compare our models using within-sample comparison.
+ 
+```{r}
+BIC <- c(preg=extractAIC(preg, k=log(m))[2],
+         preg2=extractAIC(preg3, k=log(m))[2],
+         preg3=extractAIC(preg3, k=log(m))[2],
+         preg4=extractAIC(preg4, k=log(m))[2],
+         preg5=extractAIC(preg5, k=log(m))[2],
+         preg6=extractAIC(preg6, k=log(m))[2],
+         preg7=extractAIC(preg7, k=log(m))[2]
+         )
+BIC
+
+## Model probabilities
+eBIC <- exp(-0.5*(BIC-min(BIC)))
+eBIC
+probs <- eBIC/sum(eBIC)
+round(probs, 5)
+```
+
+BIC prefers the more complicated model.
+
+Let us see the residual diagnostics for our preferred model.
+
+```{r,fig.align='center',fig.height=4,fig.width=12}
+qr.preg3<-qresiduals(preg3)
+
+par(mfrow=c(1,3))
+plot(preg3$fitted, qr.preg3,col=6,main="Randomized Quantile Residuals")
+abline(h=0)
+qqnorm(qr.preg3,col=6,ylim=c(-8,8))
+abline(0,1)
+hist(qr.preg3,col=6)
+```
+
+The fit is not normal and the residuals are very much bunched up.
+<br>
+\bigskip
+
+## Predictions
+
+Let us look at some predictions.
+
+```{r,fig.align='center',fig.height=4,fig.width=9}
+lpred3 <- predict(preg3,newdata=test,type="response")
+pred3 <- predict(preg3,newdata=test)
+
+par(mfrow=c(1,2))
+plot(train$years, (train$citations), col=c(5,6)[as.numeric(train$journal)],xlab='years',ylab='citations')
+lines(lpred3, col="darkorchid",lwd=2)
+
+plot(train$years, log(train$citations), col=c(5,6)[as.numeric(train$journal)],xlab='years',ylab='log citations')
+lines(pred3, col="darkorchid",lwd=2)
+```
+
+
+What proportion of deviance is explained by our model?
+
+```{r}
+(preg3$null.dev-preg3$dev)/preg3$null.dev
+```
+
+The output of the stepwise regression might be only good for training dataset.
+
+We shall use out-of-sample prediction to pick the best model based on test data.
+
+```{r}
+models <- list(one=preg, two=preg2, three=preg3, four=preg4, five=preg5, six=preg6, seven=preg7)
+
+preds <- sapply(models, predict, newdata=test)
+error <- apply(preds, 2, '-', test$citations)
+sort(round(mse <- apply(error^2, 2, mean),5))
+```
+
+
+Only model four(choice model) outperforms the first model on test data. 
+
+
+Let us examine residual diagnostics of the choice model.
+
+```{r,fig.align='center',fig.height=4,fig.width=12}
+qr.preg4<-qresiduals(preg4)
+
+par(mfrow=c(1,3))
+plot(preg4$fitted, qr.preg4,col=6,main="Randomized Quantile Residuals")
+abline(h=0)
+qqnorm(qr.preg4,col=6,ylim=c(-8,8))
+abline(0,1)
+hist(qr.preg4,col=6)
+```
+
+The fit is still very bad.
+
+Let us fit a negative binomial model to see if it provides better fit..
+
+```{r,fig.align='center',fig.height=4,fig.width=12}
+library(MASS)
+summary(preg8 <- glm.nb(citations ~ journal + offset(log(years)) + authors + involvement + us + academia + male + authors*involvement, data = train))
+```
+
+
+```{r,fig.align='center',fig.height=4,fig.width=12}
+qr.preg8<-qresiduals(preg8)
+
+
+par(mfrow=c(1,3))
+plot(preg8$fitted, qr.preg8,col=6,main="Randomized Quantile Residuals")
+abline(h=0)
+qqnorm(qr.preg8,col=6,ylim=c(-8,8))
+abline(0,1)
+hist(qr.preg8,col=6)
+
+```
+
+Still not normal.
+
+```{r}
+models <- list(one=preg, two=preg2, three=preg3, four=preg4, five=preg5, six=preg6, seven=preg7,eight=preg8)
+
+preds <- sapply(models, predict, newdata=test)
+error <- apply(preds, 2, '-', test$citations)
+sort(round(mse <- apply(error^2, 2, mean),5))
+```
+
+The negative binomial model does not outperform on test data. 
+
+<br>
+Let us view predictions for our choice model **`preg4: glm(formula = citations ~ journal + offset(log(years)) + authors + involvement + us + academia + male + authors:involvement, family = poisson, data = train)`**, and our first poisson model(preg) with no interactions, and the model that performed best on train data (preg3).
+
+
+```{r,fig.align='center',fig.height=5,fig.width=12}
+
+final <- list(test_data=preg4, no_int=preg, train_data = preg3)
+
+finalpred <- sapply(final, predict, newdata=test,type="response")
+finalpred.t <- sapply(final, predict, newdata=test)
+
+par(mfrow=c(1,2))
+linecols = c('darkorchid','cyan','brown1','green')
+
+plot(data$years, (data$citations),col=c(5,6)[as.numeric(data$journal)],
+     xlab='years',ylab='citations',main='Original Scale')
+for(i in c(1:3)){
+  lines(finalpred[,i], col=linecols[i], lwd=2)
+}
+legend("topleft", legend=names(final),  fill=linecols)
+
+plot(data$years, log(data$citations),col=c(5,6)[as.numeric(data$journal)],
+     xlab='years',ylab='log citations',main='Transformed Scale')
+for(i in c(1:3)){
+  lines(finalpred.t[,i], col=linecols[i], lwd=2)
+}
+legend("bottomright", legend=names(final),  fill=linecols)
+```
+
+
+There is not much difference between the best model and the model with no interactions. We could go with the simpler model with no interactions and still have close to the same output. This will greatly reduce the complexity of our analysis.
+
+
+## Model Interpretation
+
+The goal of the research is not prediction, but to understand if there are team structures that lead to better outcomes in scientific teams. A summary of our findings is listed below:
+
+**1) Bigger teams lead to better outcomes (authors is significant).**
+
+**2) Balanced distribution of tasks among authors leads to better outcomes, while imbalanced distribution of tasks among authors leads to worse outcomes.**
+
+**3) Institutions with US affiliation and gender imbalance favoring males is correlated to better outcomes, while working without industry collaboration is correlated with worse outcomes. More analysis is needed to understand why this is case.**
+
+
+
+-------------------------------------------
+
+
+
+
+
+
+<br>
+<br>
